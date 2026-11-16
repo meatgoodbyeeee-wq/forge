@@ -348,6 +348,12 @@ public final class CombatDrillSolver {
     private final Creature[][] sides;
     private final int maxPly;
     private final Map<Long, Entry> memo = new HashMap<>();
+    private Map<Long, int[][]> combatCache = new HashMap<>();
+    /** group[side][i]: index of the first creature identical to creature i (same stats and keywords). */
+    private final int[][] group;
+    /** blockOrder[def][b]: attacker creature indices blocker b of side def tries, best first; -1 = no block. */
+    private int[][][] blockOrder;
+    private boolean symmetry = true;
     private long nodes;
     private long leaves;
     private long deadlineNanos = Long.MAX_VALUE;
@@ -362,6 +368,74 @@ public final class CombatDrillSolver {
         }
         this.sides = new Creature[][] {me, op};
         this.maxPly = maxPly;
+        group = new int[2][];
+        for (int side = 0; side < 2; side++) {
+            Creature[] cs = sides[side];
+            group[side] = new int[cs.length];
+            for (int i = 0; i < cs.length; i++) {
+                group[side][i] = i;
+                for (int q = 0; q < i; q++) {
+                    if (identical(cs[q], cs[i])) {
+                        group[side][i] = group[side][q];
+                        break;
+                    }
+                }
+            }
+        }
+        setOrdering(true);
+    }
+
+    static boolean identical(Creature x, Creature y) {
+        return x.p == y.p && x.t == y.t && x.fly == y.fly && x.reach == y.reach && x.fs == y.fs && x.ds == y.ds
+                && x.dt == y.dt && x.tr == y.tr && x.me == y.me && x.vg == y.vg && x.ll == y.ll && x.ind == y.ind
+                && x.df == y.df && x.hx == y.hx && x.wd == y.wd;
+    }
+
+    /** Skip attacks/blocks that only swap identical creatures (on by default; exact). */
+    public void setSymmetry(boolean on) {
+        this.symmetry = on;
+    }
+
+    /**
+     * Try promising blocks first (on by default; changes only the search order, not the values). Off = the order
+     * of engine.js (no block, then the attackers in order).
+     */
+    public void setOrdering(boolean on) {
+        blockOrder = new int[2][][];
+        for (int def = 0; def < 2; def++) {
+            Creature[] dcs = sides[def], acs = sides[1 - def];
+            blockOrder[def] = new int[dcs.length][];
+            for (int bi = 0; bi < dcs.length; bi++) {
+                Integer[] opts = new Integer[acs.length + 1];
+                opts[0] = -1;
+                for (int ai = 0; ai < acs.length; ai++) opts[ai + 1] = ai;
+                if (on) {
+                    final Creature bc = dcs[bi];
+                    java.util.Arrays.sort(opts, (x, y) -> Integer.compare(blockScore(bc, y < 0 ? null : acs[y]),
+                            blockScore(bc, x < 0 ? null : acs[x])));
+                }
+                blockOrder[def][bi] = new int[opts.length];
+                for (int q = 0; q < opts.length; q++) blockOrder[def][bi][q] = opts[q];
+            }
+        }
+    }
+
+    /** Rough one-on-one value of blocking attacker a with b (higher = better for the defender); null = no block. */
+    static int blockScore(Creature b, Creature a) {
+        if (a == null) return 0;
+        boolean aFirst = (a.fs || a.ds) && !(b.fs || b.ds);
+        boolean bFirst = (b.fs || b.ds) && !(a.fs || a.ds);
+        int aDmg = a.ds ? 2 * a.p : a.p, bDmg = b.ds ? 2 * b.p : b.p;
+        boolean bKills = !a.ind && b.p > 0 && (b.dt || bDmg >= a.t);
+        boolean aKills = !b.ind && a.p > 0 && (a.dt || aDmg >= b.t);
+        if (aFirst && !b.ind && a.p > 0 && (a.dt || a.p >= b.t)) bKills = false;
+        if (bFirst && !a.ind && b.p > 0 && (b.dt || b.p >= a.t)) aKills = false;
+        return (bKills ? creatureValue(a) : 0) - (aKills ? creatureValue(b) : 0) + (a.tr ? 0 : 2 * Math.max(a.p, 0));
+    }
+
+    /** Reuse the combat results of another solver over the same creatures (e.g. a shallower iteration). */
+    public void shareCombatCache(CombatDrillSolver other) {
+        this.combatCache = other.combatCache;
     }
 
     public void setRootNoAttack(int mask) {
@@ -409,22 +483,58 @@ public final class CombatDrillSolver {
 
     /** Attack subsets (as creature bitmasks) of the side to move, in the order engine.js enumerates them. */
     public int[] attackSubsets(State st, int ply) {
+        return attackSubsets(st, ply, false);
+    }
+
+    /**
+     * Attack subsets of the side to move. With {@code canonical}, subsets that only differ by which of several
+     * identical creatures attack are enumerated once (the first ones of each group attack).
+     */
+    int[] attackSubsets(State st, int ply, boolean canonical) {
         int att = st.turn;
         Creature[] cs = sides[att];
+        boolean root = ply == 0 && att == 0;
         int[] elig = new int[cs.length];
         int n = 0;
         for (int i = 0; i < cs.length; i++) {
             if ((st.alive[att] >> i & 1) == 0 || cs[i].df) continue; // defender cannot attack
-            if (ply == 0 && att == 0 && (rootNoAttack >> i & 1) != 0) continue;
+            if (root && (rootNoAttack >> i & 1) != 0) continue;
             elig[n++] = i;
         }
+        // prevE[k] = earlier eligible position holding an identical creature (-1: none)
+        int[] prevE = new int[n];
+        int need = 0;
+        for (int k = 0; k < n; k++) {
+            prevE[k] = -1;
+            if (!canonical) continue;
+            for (int q = k - 1; q >= 0; q--) {
+                if (prevSame(att, elig[q], elig[k]) && (!root || (rootStayTapped >> elig[q] & 1) == (rootStayTapped >> elig[k] & 1))) {
+                    prevE[k] = q;
+                    need |= 1 << k;
+                    break;
+                }
+            }
+        }
         int[] res = new int[1 << n];
+        int cnt = 0;
         for (int m = 0; m < (1 << n); m++) {
+            if (need != 0) {
+                boolean ok = true;
+                for (int k = 0; k < n && ok; k++) {
+                    if ((m >> k & 1) != 0 && prevE[k] >= 0 && (m >> prevE[k] & 1) == 0) ok = false;
+                }
+                if (!ok) continue;
+            }
             int mask = 0;
             for (int k = 0; k < n; k++) if ((m >> k & 1) != 0) mask |= 1 << elig[k];
-            res[m] = mask;
+            res[cnt++] = mask;
         }
-        return res;
+        return cnt == res.length ? res : java.util.Arrays.copyOf(res, cnt);
+    }
+
+    /** Whether creature j of {@code side} is identical to the earlier creature i (same stats and keywords). */
+    private boolean prevSame(int side, int i, int j) {
+        return group[side][i] == group[side][j];
     }
 
     /** Minimax value with alpha-beta (fail-soft) and the transposition table. */
@@ -442,7 +552,7 @@ public final class CombatDrillSolver {
         nodes++;
         if ((nodes & 255) == 0 && System.nanoTime() > deadlineNanos) throw new TimeoutException();
         boolean maxer = st.turn == 0;
-        int[] subs = attackSubsets(st, ply);
+        int[] subs = attackSubsets(st, ply, symmetry);
         if (e != null) {
             for (int i = 0; i < subs.length; i++) {
                 if (subs[i] == e.best) {
@@ -484,10 +594,14 @@ public final class CombatDrillSolver {
     /** Enumerates the defender's block assignments (forEachBlock + the callback of attackValue in engine.js). */
     private final class BlockSearch {
         final State st;
-        final int ply;
+        final int ply, def, attackerMask;
         final int[] attackers;
         final Creature[] attList;
+        /** posOf[creature index of the attacking side] = position in {@code attackers}, or -1. */
+        final int[] posOf;
         final int[] avail;
+        /** Earlier avail position holding an identical blocker (-1: none). */
+        final int[] prevB;
         final int[] assign;
         final boolean maxer;
         int a, b, worst;
@@ -496,11 +610,20 @@ public final class CombatDrillSolver {
         BlockSearch(State st, int ply, int attackerMask, int alpha, int beta) {
             this.st = st;
             this.ply = ply;
-            int att = st.turn, def = 1 - att;
+            this.attackerMask = attackerMask;
+            int att = st.turn;
+            def = 1 - att;
             Creature[] acs = sides[att], dcs = sides[def];
             attackers = new int[Integer.bitCount(attackerMask)];
+            posOf = new int[acs.length];
+            java.util.Arrays.fill(posOf, -1);
             int n = 0;
-            for (int i = 0; i < acs.length; i++) if ((attackerMask >> i & 1) != 0) attackers[n++] = i;
+            for (int i = 0; i < acs.length; i++) {
+                if ((attackerMask >> i & 1) != 0) {
+                    posOf[i] = n;
+                    attackers[n++] = i;
+                }
+            }
             attList = new Creature[attackers.length];
             for (int j = 0; j < attackers.length; j++) attList[j] = acs[attackers[j]];
             int[] tmp = new int[dcs.length];
@@ -509,6 +632,17 @@ public final class CombatDrillSolver {
                 if ((st.alive[def] >> i & 1) != 0 && (st.tapped >> i & 1) == 0) tmp[n++] = i;
             }
             avail = java.util.Arrays.copyOf(tmp, n);
+            prevB = new int[n];
+            for (int k = 0; k < n; k++) {
+                prevB[k] = -1;
+                if (!symmetry) continue;
+                for (int q = k - 1; q >= 0; q--) {
+                    if (prevSame(def, avail[q], avail[k])) {
+                        prevB[k] = q;
+                        break;
+                    }
+                }
+            }
             assign = new int[n];
             java.util.Arrays.fill(assign, -1);
             maxer = st.turn == 0;
@@ -524,15 +658,20 @@ public final class CombatDrillSolver {
                 leaf();
                 return;
             }
-            Creature[] dcs = sides[1 - st.turn];
-            assign[k] = -1;
-            rec(k + 1);
-            for (int j = 0; j < attackers.length; j++) {
-                if (canBlock(dcs[avail[k]], attList[j])) {
-                    assign[k] = j;
-                    rec(k + 1);
-                    if (stop) return;
+            Creature blocker = sides[def][avail[k]];
+            int floor = prevB[k] >= 0 ? assign[prevB[k]] : -1; // identical blockers: non-decreasing targets
+            for (int ci : blockOrder[def][avail[k]]) {
+                int j;
+                if (ci < 0) {
+                    j = -1;
+                } else {
+                    j = posOf[ci];
+                    if (j < 0 || !canBlock(blocker, attList[j])) continue;
                 }
+                if (j < floor) continue;
+                assign[k] = j;
+                rec(k + 1);
+                if (stop) return;
             }
             assign[k] = -1;
         }
@@ -549,7 +688,7 @@ public final class CombatDrillSolver {
 
         void leaf() {
             if ((++leaves & 255) == 0 && System.nanoTime() > deadlineNanos) throw new TimeoutException();
-            List<State> outs = resolve(st, ply, attackers, avail, assign);
+            List<State> outs = resolve(st, ply, attackerMask, attackers, avail, assign);
             int ov = maxer ? -INF : INF;
             int a2 = a, b2 = b;
             for (State o : outs) {
@@ -587,9 +726,19 @@ public final class CombatDrillSolver {
         return f;
     }
 
-    /** Resolves a combat into the distinct resulting positions (one per damage assignment choice). */
-    private List<State> resolve(State st, int ply, int[] attackers, int[] avail, int[] assign) {
-        int att = st.turn, def = 1 - att;
+    /**
+     * Distinct combat results {deadAtt, deadDef, toPlayer, gainAttacker, gainDefender} (creature bitmasks), in the
+     * order of the damage assignment choices. Depends only on who attacks and who blocks whom, so it is cached.
+     */
+    private int[][] combatResults(int att, int attackerMask, int[] attackers, int[] avail, int[] assign) {
+        long ck = att;
+        ck = ck << 12 | attackerMask;
+        int[] code = new int[MAX_PER_SIDE];
+        for (int k = 0; k < avail.length; k++) if (assign[k] >= 0) code[avail[k]] = assign[k] + 1;
+        for (int i = 0; i < MAX_PER_SIDE; i++) ck = ck << 4 | code[i];
+        int[][] cached = combatCache.get(ck);
+        if (cached != null) return cached;
+        int def = 1 - att;
         Creature[] acs = sides[att], dcs = sides[def];
         Fighter[] A = new Fighter[attackers.length];
         for (int j = 0; j < attackers.length; j++) {
@@ -609,24 +758,44 @@ public final class CombatDrillSolver {
             }
         }
         List<Outcome> outs = combat(A, B);
-        int tappedAll = 0;
-        for (int ai : attackers) if (!acs[ai].vg) tappedAll |= 1 << ai; // vigilance does not tap
-        if (ply == 0 && att == 0) tappedAll |= rootStayTapped;
-        Set<Long> seen = new HashSet<>();
-        List<State> res = new ArrayList<>(outs.size());
+        List<int[]> rows = new ArrayList<>(outs.size());
+        Set<List<Integer>> seen = new HashSet<>();
         for (Outcome o : outs) {
             int deadAtt = 0, deadDef = 0;
             for (int j = 0; j < attackers.length; j++) if (!o.aAlive[j]) deadAtt |= 1 << attackers[j];
             for (int j = 0; j < bIdx.length; j++) if (!o.bAlive[j]) deadDef |= 1 << bIdx[j];
+            int[] row = {deadAtt, deadDef, o.toPlayer, o.gainA, o.gainD};
+            if (seen.add(java.util.Arrays.asList(deadAtt, deadDef, o.toPlayer, o.gainA, o.gainD))) rows.add(row);
+        }
+        int[][] res = rows.toArray(new int[0][]);
+        combatCache.put(ck, res);
+        return res;
+    }
+
+    /** Resolves a combat into the distinct resulting positions (one per damage assignment choice). */
+    private List<State> resolve(State st, int ply, int attackerMask, int[] attackers, int[] avail, int[] assign) {
+        int att = st.turn, def = 1 - att;
+        Creature[] acs = sides[att];
+        int[][] rows = combatResults(att, attackerMask, attackers, avail, assign);
+        int tappedAll = 0;
+        for (int ai : attackers) if (!acs[ai].vg) tappedAll |= 1 << ai; // vigilance does not tap
+        if (ply == 0 && att == 0) tappedAll |= rootStayTapped;
+        List<State> res = new ArrayList<>(rows.length);
+        long[] seen = new long[rows.length];
+        int nSeen = 0;
+        for (int[] o : rows) {
             int[] alive = {st.alive[0], st.alive[1]};
-            alive[att] &= ~deadAtt;
-            alive[def] &= ~deadDef;
+            alive[att] &= ~o[0];
+            alive[def] &= ~o[1];
             int[] life = {st.life[0], st.life[1]};
-            life[def] -= o.toPlayer;
-            life[att] += o.gainA;
-            life[def] += o.gainD;
+            life[def] -= o[2];
+            life[att] += o[3];
+            life[def] += o[4];
             long sk = ((long) alive[0] << 12 | alive[1]) << 40 | (long) (life[0] + 100000) << 20 | (life[1] + 100000);
-            if (!seen.add(sk)) continue;
+            boolean dup = false;
+            for (int q = 0; q < nSeen; q++) if (seen[q] == sk) { dup = true; break; }
+            if (dup) continue;
+            seen[nSeen++] = sk;
             res.add(new State(alive, life, def, tappedAll & alive[att]));
         }
         return res;
@@ -660,9 +829,9 @@ public final class CombatDrillSolver {
      * unless another attack is strictly better.
      */
     public Choice choose(State root, int preferredMask) {
-        int[] subs = attackSubsets(root, 0);
+        int[] subs = attackSubsets(root, 0, symmetry);
         boolean legal = false;
-        for (int s : subs) if (s == preferredMask) legal = true;
+        for (int s : attackSubsets(root, 0, false)) if (s == preferredMask) legal = true;
         int bestMask = legal ? preferredMask : subs[0];
         int best = attackValue(root, bestMask);
         int pref = legal ? best : Integer.MIN_VALUE;

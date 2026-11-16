@@ -53,7 +53,7 @@ public final class CombatDrillAttack {
         public int minPly = 4;
         public int maxPly = 8;
         public long budgetMs = 2000;
-        public int maxCreatures = 6;
+        public int maxCreatures = 8;
         public boolean verbose;
     }
 
@@ -234,8 +234,13 @@ public final class CombatDrillAttack {
         final long deadline = t0 + cfg.budgetMs * 1_000_000L;
         Choice choice = null;
         int donePly = 0;
+        CombatDrillSolver prev = null;
         for (int ply = cfg.minPly; ply <= cfg.maxPly; ply += 2) {
             CombatDrillSolver solver = new CombatDrillSolver(me, op, ply);
+            if (prev != null) {
+                solver.shareCombatCache(prev);
+            }
+            prev = solver;
             solver.setRootNoAttack(noAttack);
             solver.setRootStayTapped(stayTapped);
             solver.setDeadline(deadline);

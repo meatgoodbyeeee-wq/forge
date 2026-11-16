@@ -5,7 +5,7 @@ import java.util.*;
 public class Bench {
   public static void main(String[] a){
     Random r=new Random(1);
-    for(int n=3;n<=7;n++) for(int ply: new int[]{4,6,8}){
+    for(int n=Integer.getInteger("nmin",3);n<=Integer.getInteger("nmax",7);n++) for(int ply: new int[]{4,6,8}){
       long tot=0,max=0; int to=0, N=20;
       for(int k=0;k<N;k++){
         Creature[] me=new Creature[n], op=new Creature[n];
