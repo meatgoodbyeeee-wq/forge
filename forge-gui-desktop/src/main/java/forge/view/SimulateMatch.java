@@ -216,6 +216,9 @@ public class SimulateMatch {
         if (Boolean.TRUE.equals(flatMonteCarlo)) {
             System.out.println(FlatMonteCarloStats.summary());
         }
+        if (forge.ai.combatdrill.CombatDrillStats.isUsed()) {
+            System.out.println(forge.ai.combatdrill.CombatDrillStats.summary());
+        }
         System.out.flush();
     }
 

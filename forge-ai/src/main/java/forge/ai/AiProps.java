@@ -188,7 +188,16 @@ public enum AiProps {
     FLAT_MC_LAND_CHOICE("true"),
     /** Plan the next land drops against the colours and costs of the hand and the commander (see LandPlanner). */
     LAND_PLANNER("true"),
-    FLAT_MC_REACTIVE("true");
+    FLAT_MC_REACTIVE("true"),
+    /** Replace the attack declaration with the exhaustive combat search ported from combat-drill (see forge.ai.combatdrill). */
+    COMBAT_DRILL_ATTACK("false"),
+    /** always: whenever the search finds a strictly better attack; decisive: only to find a forced win or dodge a forced loss. */
+    COMBAT_DRILL_MODE("always"),
+    COMBAT_DRILL_MIN_PLY("4"),
+    COMBAT_DRILL_MAX_PLY("8"),
+    COMBAT_DRILL_BUDGET_MS("2000"),
+    COMBAT_DRILL_MAX_CREATURES("6"),
+    COMBAT_DRILL_VERBOSE("false");
     // Experimental features, must be promoted or removed after extensive testing and, ideally, defaulting
     // <-- There are no experimental options here -->
 

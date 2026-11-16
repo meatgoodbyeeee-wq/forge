@@ -1630,6 +1630,27 @@ public class AiController {
         }
     }
 
+    /**
+     * Exhaustive combat search ported from combat-drill: replaces the attack when every creature on the battlefield
+     * has only keywords the drill models (see {@link forge.ai.combatdrill.CombatDrillAttack}). Off unless the AI
+     * profile sets COMBAT_DRILL_ATTACK=true.
+     */
+    private void refineAttackWithCombatDrill(final Player attacker, final Combat combat) {
+        if (attacker != player || simMode != null || !getBoolProperty(AiProps.COMBAT_DRILL_ATTACK)
+                || !game.getPhaseHandler().is(PhaseType.COMBAT_DECLARE_ATTACKERS)) {
+            return;
+        }
+        final forge.ai.combatdrill.CombatDrillAttack.Config cfg = new forge.ai.combatdrill.CombatDrillAttack.Config();
+        cfg.mode = "decisive".equalsIgnoreCase(getProperty(AiProps.COMBAT_DRILL_MODE))
+                ? forge.ai.combatdrill.CombatDrillAttack.Mode.DECISIVE : forge.ai.combatdrill.CombatDrillAttack.Mode.ALWAYS;
+        cfg.minPly = getIntProperty(AiProps.COMBAT_DRILL_MIN_PLY);
+        cfg.maxPly = getIntProperty(AiProps.COMBAT_DRILL_MAX_PLY);
+        cfg.budgetMs = getIntProperty(AiProps.COMBAT_DRILL_BUDGET_MS);
+        cfg.maxCreatures = getIntProperty(AiProps.COMBAT_DRILL_MAX_CREATURES);
+        cfg.verbose = getBoolProperty(AiProps.COMBAT_DRILL_VERBOSE);
+        forge.ai.combatdrill.CombatDrillAttack.refine(attacker, combat, cfg);
+    }
+
     private Map<Card, GameEntity> commitAttackers(final Player attacker, final Combat combat) {
         final Map<Card, GameEntity> committed = new LinkedHashMap<>();
         if (attacker != player || simMode != null || attackOverride != null
@@ -1695,6 +1716,7 @@ public class AiController {
             final Map<Card, GameEntity> committed = commitAttackers(attacker, combat);
             refineAttackWithFlatMonteCarlo(attacker, combat);
             restoreCommittedAttackers(combat, committed);
+            refineAttackWithCombatDrill(attacker, combat);
         } catch (AITimeoutTracker.Expired e) {
             // out of time: attack with what was decided so far; the validity check below repairs an illegal declaration
         } finally {
