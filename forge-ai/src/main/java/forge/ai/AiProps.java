@@ -197,7 +197,9 @@ public enum AiProps {
     COMBAT_DRILL_MAX_PLY("8"),
     COMBAT_DRILL_BUDGET_MS("2000"),
     COMBAT_DRILL_MAX_CREATURES("8"),
-    COMBAT_DRILL_VERBOSE("false");
+    COMBAT_DRILL_VERBOSE("false"),
+    /** Only decisive overrides while the opponent has an untapped land and a card in hand (possible instant). */
+    COMBAT_DRILL_CAUTIOUS("false");
     // Experimental features, must be promoted or removed after extensive testing and, ideally, defaulting
     // <-- There are no experimental options here -->
 

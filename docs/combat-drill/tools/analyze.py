@@ -8,7 +8,7 @@ def res(f):
 groups=collections.defaultdict(lambda:[0,0])
 stats=collections.defaultdict(lambda: collections.Counter())
 for f in glob.glob('/home/claude/work/runs/*_[0-9]*.log'):
-    tag=re.sub(r'_\d+\.log$','',f.split('/')[-1]); w=res(f); g=groups[tag]; g[0]+=w[0]; g[1]+=w[1]
+    tag=re.sub(r'_\d+\.log$','',f.split('/')[-1]); tag={'diagWG':'rm_drillWG','diagBR':'rm_drillBR'}.get(tag,tag); w=res(f); g=groups[tag]; g[0]+=w[0]; g[1]+=w[1]
     for l in open(f,errors='ignore'):
         m=re.match(r'COMBAT-DRILL calls=(\d+) eligible=(\d+) searched=(\d+) timeouts=(\d+) overrides=(\d+) \(wins found=(\d+), losses avoided=(\d+)\)',l)
         if m:
@@ -38,4 +38,4 @@ def eff(pref,drill='drill'):
         d=(out[0][1]-out[0][2]+out[1][1]-out[1][2])/2; se=math.sqrt(out[0][4]**2+out[1][4]**2)/2
         print(f"  {pref} {drill} combined: {100*d:+.1f} pt (se {100*se:.1f}, z={d/se:.2f})")
 for pref in ('co','rm'):
-    eff(pref); eff(pref,'dec')
+    eff(pref); eff(pref,'dec'); eff(pref,'cau'); eff(pref,'off')

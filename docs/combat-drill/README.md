@@ -11,7 +11,8 @@
 | `forge-ai/src/main/java/forge/ai/combatdrill/CombatDrillStats.java` | sim の最後に出す集計 |
 | `AiController.declareAttackers` | 元の判断（＋Flat Monte Carlo）の後に `refineAttackWithCombatDrill` を呼ぶ |
 | `AiProps` の `COMBAT_DRILL_*` | 設定。既定はオフ |
-| `forge-gui/res/ai/Drill.ai`／`DrillDecisive.ai` | Default.ai ＋ドリル有効のプロファイル（mode が always／decisive） |
+| `forge-gui/res/ai/Drill.ai`／`DrillDecisive.ai`／`DrillCautious.ai` | Default.ai ＋ドリル有効のプロファイル（always／decisive／控えめ） |
+| `forge-gui/res/ai/DrillOff.ai` | プラシーボ（Drill.ai と同じでドリルだけオフ）。sim の対照用 |
 | `docs/combat-drill/tools/` | JS 版との照合（`gen.js`＋`XCheck.java`）と速度計測（`Bench.java`） |
 | `docs/combat-drill/decks/` | 検証用デッキ（キーワードだけのクリーチャー＋基本土地、除去入り版） |
 | `docs/combat-drill/tools/runall.sh`・`analyze.py`・`diag.py` | まとめて sim を回すスクリプト、勝率の集計、差し替えの分類（`COMBAT_DRILL_VERBOSE=true` のログから） |
@@ -71,6 +72,26 @@ java -cp out xc.XCheck cases.txt
 
 デッキ：`drill-wg.dck`（白緑）対 `drill-br.dck`（黒赤）。どちらもキーワードだけのクリーチャー＋基本土地。`-mc off`。
 
+### 対照実験：プラシーボと「控えめ」設定（2026-11-17 午後）
+
+除去入りデッキで2つ追加した。
+
+- **プラシーボ（`DrillOff.ai`）**：`Drill.ai` と同じ設定でドリルだけオフ。各席 200試合。勝率の差は白緑 −3.3、黒赤 +3.3、ならすと 0.0。**この組み合わせの席ごとの誤差は ±4〜5ポイントある**ことがわかった
+- **控えめ（`DrillCautious.ai`、`COMBAT_DRILL_CAUTIOUS=true`）**：相手にアンタップの土地と手札があるとき（インスタントがありうるとき）は、勝ちの発見と負けの回避だけ差し替える。各席 300試合
+
+元のAI同士（300試合）とプラシーボ（各席200試合）を合わせた500試合を基準にした結果：
+
+| 設定 | 白緑の席 | 黒赤の席 | ならした効果 |
+|---|---|---|---|
+| Drill（always） | 45.7%（基準 49.0%）→ −3.3 | 65.0%（基準 51.0%）→ **+14.0** | **+5.3ポイント**（z≈2.1） |
+| DrillCautious | 46.0% → −3.0 | 58.7% → +7.7 | +2.3ポイント |
+| DrillDecisive | 46.0% → −3.0（100試合） | 50.0% → −1.0（100試合） | −2.0ポイント |
+
+- **「インスタントのせいで白緑が負ける」という仮説は支持されなかった**。控えめにしても白緑側は変わらず、黒赤側の効果が半分に減っただけ
+- 白緑側のマイナス（−3.3）は、プラシーボの振れ幅（±3.3）と同じくらいで、誤差の可能性が高い
+- 黒赤側の改善（+14.0）ははっきりしている。黒赤ドリルは300試合で「勝ちを発見」が70回、白緑ドリルは29回。威迫・飛行・接死の多い攻撃的なデッキほど、ドリルが詰めを見つける場面が多い
+- 結論：既定は **always のまま**。控えめ設定は効果がなかったので既定オフで残す
+
 ### 試合数を増やした検証（2026-11-17）
 
 除去入りのデッキ（`drill-wg-rm.dck`／`drill-br-rm.dck`：クリーチャー17＋除去6＋土地17）を追加。白緑の除去は噛みつき系・《払拭の光》・《巨怪の撃滅》、黒赤は《ショック》《稲妻の一撃》《殺害》《地獄の握撃》（インスタントの火力が多い）。
@@ -119,10 +140,9 @@ java -cp out xc.XCheck cases.txt
 
 ## 5. 次にやること（案）
 
-1. 白緑側のマイナスの原因を確かめる（相手の構えたマナと手札を考慮して差し替えを控える設定を試す）。その後、インスタント用エンジン（engine2.js）を移植して、相手の火力・トリックを探索に入れる
-2. 9体以上の盤面への対応：攻撃の候補を絞る近似探索（その場合は「完全一致」の照合から外れる）
-3. always と decisive の比較
-4. ブロックの差し替え（`AiBlockController`）
+1. ブロックの差し替え（`AiBlockController`）：今は攻撃だけなので、守る側の判断にもドリルを使う
+2. インスタント用エンジン（engine2.js）の移植（控えめ設定の結果からは優先度は下がった）
+3. 9体以上の盤面への対応：攻撃の候補を絞る近似探索（その場合は「完全一致」の照合から外れる）
 
 ## 6. 実行方法
 

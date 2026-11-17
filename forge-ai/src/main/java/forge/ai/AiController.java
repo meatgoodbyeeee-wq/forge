@@ -1648,6 +1648,7 @@ public class AiController {
         cfg.budgetMs = getIntProperty(AiProps.COMBAT_DRILL_BUDGET_MS);
         cfg.maxCreatures = getIntProperty(AiProps.COMBAT_DRILL_MAX_CREATURES);
         cfg.verbose = getBoolProperty(AiProps.COMBAT_DRILL_VERBOSE);
+        cfg.cautious = getBoolProperty(AiProps.COMBAT_DRILL_CAUTIOUS);
         forge.ai.combatdrill.CombatDrillAttack.refine(attacker, combat, cfg);
     }
 

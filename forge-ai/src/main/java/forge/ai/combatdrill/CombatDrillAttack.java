@@ -55,6 +55,11 @@ public final class CombatDrillAttack {
         public long budgetMs = 2000;
         public int maxCreatures = 8;
         public boolean verbose;
+        /**
+         * When the opponent has an untapped land and a card in hand (possible instant: burn, trick), only make
+         * decisive overrides; the basic engine cannot see instants.
+         */
+        public boolean cautious;
     }
 
     private CombatDrillAttack() { }
@@ -266,7 +271,13 @@ public final class CombatDrillAttack {
         }
         int clsBest = CombatDrillSolver.classify(choice.value)[0];
         int clsPref = CombatDrillSolver.classify(choice.preferredValue)[0];
-        if (cfg.mode == Mode.DECISIVE && !(clsBest == 1 && clsPref != 1) && !(clsPref == -1 && clsBest != -1)) {
+        boolean decisiveOnly = cfg.mode == Mode.DECISIVE;
+        if (cfg.cautious && !opp.getCardsIn(ZoneType.Hand).isEmpty()
+                && !opp.getLandsInPlay().filter(c -> !c.isTapped()).isEmpty()) {
+            decisiveOnly = true;
+        }
+        if (decisiveOnly && !(clsBest == 1 && clsPref != 1) && !(clsPref == -1 && clsBest != -1)) {
+            CombatDrillStats.skip("held back (open mana)");
             return false;
         }
         if (clsBest == 1 && clsPref != 1) {
