@@ -277,7 +277,8 @@ public final class CombatDrillAttack {
 
         if (cfg.verbose) {
             System.out.println("[combat-drill] me " + describe(me) + " vs op " + describe(op) + " life "
-                    + ai.getLife() + "-" + opp.getLife() + " ply " + donePly + ": original " + names(myList, preferred)
+                    + ai.getLife() + "-" + opp.getLife() + " oppHand " + opp.getCardsIn(ZoneType.Hand).size()
+                    + " oppOpenLands " + opp.getLandsInPlay().filter(c -> !c.isTapped()).size() + " ply " + donePly + ": original " + names(myList, preferred)
                     + " (" + choice.preferredValue + ") -> " + names(myList, choice.mask) + " (" + choice.value + ")");
         }
         for (int i = 0; i < myList.size(); i++) {
